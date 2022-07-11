@@ -1,87 +1,46 @@
-#############################################################################
-# КАКОЙ ИСПОЛЬЗУЕТСЯ ПРОВАЙДЕР И РЕГИОН
-#############################################################################
-
 provider "aws" {
-    region = "eu-central-1"
+    access_key = "${var.aws_access_key}"
+    secret_key = "${var.aws_secret_key}"
+    region = "${var.region}"
 }
 
-#############################################################################
-# СОЗДАДИМ ИНСТАНС
-#############################################################################
+locals {
 
-resource "aws_instance" "devops" {
-    ami = "ami-065deacbcaac64cf2"
-    instance_type = "t2.micro"
+  instance_count = {
+  stage = 1
+  prod = 2
+  }
 
-    tags = {
-    Name = "DevOps_test"
+  instance_type = {
+  stage = "t3.micro"
+  prod = "t3.small"
+  }
+
+  for_each_inst_count = {
+    stage = { count = 1 }
+    prod  = { count = 2 }
   }
 }
 
-#############################################################################
-# Amazon S3 Bucket
-#############################################################################
+resource "aws_instance" "hw-terraform-basic" {
+    ami = "ami-065deacbcaac64cf2"
+    instance_type = terraform.workspace == "default" ? "t2.medium" : "t2.micro"
+    count = local.instance_count[terraform.workspace]
 
-# Создадим ресурс "aws_s3_bucket" и дадим ему имя "terraform_state"
-# Дадим глобально-уникальное имя корзине (bucket). Имя должно быть уникальным на весь интернет
-resource "aws_s3_bucket" "terraform_state" {
-    bucket = "devops-artem-tf-state"
-
-    # Защита от случайного удаления S3 bucket
-    # Даже командой terraform destroy невозможно будет удалить эту корзину
-    # Если потребуется ее удалить, то просто закомментируйте эти строки
     lifecycle {
-        prevent_destroy = true
-       }
-
-    # Включить версионирование, чтобы мы могли видеть полную историю ревизий файлов состояния
-    # При каждом деплое будет создаваться навая версия файла состояния
-    # Таким образом можно легко будет откатиться на нужную версию
-    versioning {
-        enabled = true
-    }
-
-    # Включить шифрование на стороне Amazon
-       server_side_encryption_configuration {
-        rule {
-            apply_server_side_encryption_by_default {
-            sse_algorithm = "AES256"
-            }
-        }
-    }
+    create_before_destroy = true
+  }
 }
 
-#############################################################################
-# Amazon DynamoDB - это распределенное хранилище ключей и значений
-# Он поддерживает строго согласованные операции чтения и условной записи,
-#  которые являются всеми компонентами, необходимыми для системы распределенной блокировки
-#############################################################################
-
-# В DynamoDB создадим таблицу "terraform_locks" с первичным ключом "LockID" для использования блокировки
-#
-resource "aws_dynamodb_table" "terraform_locks" {
-    name = "devops-terraform-state-locks"
-    billing_mode = "PAY_PER_REQUEST"
-    hash_key = "LockID"
-
-    attribute {
-        name = "LockID"
-        type = "S"
-    }
+resource "aws_instance" "ForEach" {
+  ami = "ami-065deacbcaac64cf2"
+  instance_type = terraform.workspace == "default" ? "t2.medium" : "t2.micro"
+  for_each   = local.for_each_inst_count[terraform.workspace]
 }
 
-# Сообщаем самому Terraform, где хранится удаленный бэкенд
-terraform {
-    backend "s3" {
-        # Имя корзины, которое определили в самом начале
-        bucket = "devops-artem-tf-state"
-        # Путь к файлу состояния Terraform
-        key = "global/s3/terraform.tfstate"
-        region = "eu-central-1"
-
-        # Имя таблицы в DynamoDB, которое определили в самом начале
-        dynamodb_table = "devops-terraform-state-locks"
-        encrypt = true
+resource "aws_s3_bucket" "terraform_state" {
+    bucket = "devops-artem-tf-state-${terraform.workspace}"
+    tags = {
+      Name = "Bucket"
     }
 }
